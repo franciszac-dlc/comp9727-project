@@ -16,6 +16,8 @@ class Dataset:
         self.create_students_dataframe()
 
 
+    # Set up the dataframes and overall dataset
+
     def create_courses_dataframe(self, df_courses, df_coursedata):
         df_coursedata['Course ID'] = df_coursedata['Course URL'].str.split('/').str[-1]
 
@@ -79,10 +81,22 @@ class Dataset:
         print(f"Duplicates: {100*duplicates:.2f}%")
 
 
+    # Train-test splits
+
     def set_train_test_split_by_user(self, seed=42):
         """
         Defines a train-test split between users. This allows us to work with
         a small number of users.
+
+        The split is visualized below (training set - o, test set - x)
+
+                        Ratings:
+                    1   2   3   4   5
+                1   o   o   o   o   o
+                2   o   o   o   o   o
+        Users:  3   o   o   o   o   o
+                4   x   x   x   x   x
+                5   x   x   x   x   x
 
         Sets the following attributes for access:
             - train_students
@@ -101,6 +115,16 @@ class Dataset:
         """
         Defines a train-test split between ratings. The first `ratio` of ratings
         chronologically are added to the test set.
+
+        The split is visualized below (training set - o, test set - x)
+
+                        Ratings:
+                    1   2   3   4   5
+                1   o   o   o   x   x
+                2   o   o   o   x   x
+        Users:  3   o   o   o   x   x
+                4   o   o   o   x   x
+                5   o   o   o   x   x
 
         Sets the following attributes for access:
             - train_ratings
@@ -128,6 +152,7 @@ class Dataset:
     def get_train_test_matrices(self):
         """
         Computes the training and test matrices for rating prediction-related tasks
+        This is meant to be ran after running `set_train_test_split_by_ratings`
 
         Returns
         - training_matrix : np.array(n_students, n_courses)
@@ -149,43 +174,187 @@ class Dataset:
         return training_matrix, test_matrix
 
 
+    def get_train_matrix_split(self, ratio=0.8):
+        """
+        Computes the training matrix for rating prediction-related tasks.
+        The matrix is randomly split into "features" and "ground truth" for
+        evaluation. This is meant to be ran after running
+        `set_train_test_split_by_user`
+
+        The split is visualized below (training features - o, ground truth - t)
+
+                        Ratings:
+                    1   2   3   4   5
+                1   o   o   o   t   t
+                2   t   o   o   o   t
+        Users:  3   t   t   o   o   o
+                4
+                5
+
+        Returns
+        - training_matrix_features     : np.array(n_train_students, n_courses)
+        - training_matrix_ground_truth : np.array(n_train_students, n_courses)
+        """
+        print("Computing the training and test rating matrix...")
+        training_matrix_ground_truth = np.zeros((len(self.student_set), len(self.course_set)), dtype=np.int8)
+        training_matrix_features = None
+        shuffled_train_ratings = self.train_ratings.sample(frac=1).reset_index(drop=True)
+        shuffle_split = int(len(shuffled_train_ratings) * ratio)
+
+        for ndx, row in tqdm(shuffled_train_ratings.iterrows()):
+            if ndx == shuffle_split:
+                training_matrix_features = training_matrix_ground_truth.copy()
+
+            student_ndx = self.student_set.index.get_loc(row['reviewers'])
+            course_ndx = self.course_set.index.get_loc(row['course_id'])
+            training_matrix_ground_truth[student_ndx, course_ndx] = row['rating']
+
+        return training_matrix_features, training_matrix_ground_truth
+
+
+    def get_test_matrix_split(self, ratio=0.5):
+        """
+        Computes the test matrix for rating prediction-related tasks.
+        The matrix is randomly split into "features" and "ground truth" for
+        evaluation. This is meant to be ran after running
+        `set_train_test_split_by_user`
+
+        The split is visualized below (training features - o, ground truth - t)
+
+                        Ratings:
+                    1   2   3   4   5
+                1
+                2
+        Users:  3
+                4   o   o   o   t   t
+                5   o   o   o   t   t
+
+        Returns
+        - test_matrix_features     : np.array(n_test_students, n_courses)
+        - test_matrix_ground_truth : np.array(n_test_students, n_courses)
+        """
+        print("Computing the test rating matrix split...")
+        test_matrix_ground_truth = np.zeros((len(self.student_set), len(self.course_set)), dtype=np.int8)
+        test_matrix_features = test_matrix_ground_truth.copy()
+        test_course_counts = {
+            s: int(self.student_set.loc[s, 'courses'] * ratio)
+            for s in self.test_students
+        }
+
+        for ndx, row in tqdm(self.test_ratings.iterrows()):
+            student_ndx = self.student_set.index.get_loc(row['reviewers'])
+            course_ndx = self.course_set.index.get_loc(row['course_id'])
+
+            if test_course_counts[row['reviewers']] >= 0:
+                test_matrix_features[student_ndx, course_ndx] = row['rating']
+
+            test_course_counts[row['reviewers']] -= 1
+            test_matrix_ground_truth[student_ndx, course_ndx] = row['rating']
+
+        return test_matrix_features, test_matrix_ground_truth
+
+
     def get_train_test_sequence_predictions(self):
         """
         Computes training and test data instances for sequential prediction.
+        This is meant to be ran after running `set_train_test_split_by_ratings`
 
         Returns
-        - train_features     : list(tuple( user, set(taken_courses) ))
+        - train_features     : list(tuple( user, tuple(taken_courses) ))
         - train_ground_truth : list(next_course)
-        - test_features      : list(tuple( user, set(taken_courses) ))
+        - test_features      : list(tuple( user, tuple(taken_courses) ))
         - test_ground_truth  : list(next_course)
         """
         print("Computing the training and test list of sequences...")
         train_X, train_y = [], []
         current_user = None
-        taken_courses = set()
+        taken_courses = tuple()
         for ndx, row in tqdm(self.train_ratings.iterrows()):
             if current_user != row['reviewers']:
                 # New user/sequence, 
                 current_user = row['reviewers']
-                taken_courses = {row['course_id']}
+                taken_courses = (row['course_id'],)
             else:
                 # Add the previous courses into the train_X list
                 train_X.append((current_user, taken_courses))
                 train_y.append(row['course_id'])
-                taken_courses = taken_courses | {row['course_id']}
+                taken_courses = (*taken_courses, row['course_id'])
 
         test_X, test_y = [], []
         current_user = None
-        taken_courses = set()
+        taken_courses = tuple()
         for ndx, row in tqdm(self.test_ratings.iterrows()):
             if current_user != row['reviewers']:
                 # New user/sequence, 
                 current_user = row['reviewers']
-                taken_courses = {row['course_id']}
+                taken_courses = (row['course_id'],)
             else:
                 # Add the previous courses into the train_X list
-                train_X.append((current_user, taken_courses))
-                train_y.append(row['course_id'])
-                taken_courses = taken_courses | {row['course_id']}
+                test_X.append((current_user, taken_courses))
+                test_y.append(row['course_id'])
+                taken_courses = (*taken_courses, row['course_id'])
+
+        return train_X, test_X, train_y, test_y
+
+
+    def get_train_test_next_course_predictions(self):
+        """
+        Computes training and test data instances for next course prediction.
+        This is meant to be ran after running `set_train_test_split_by_ratings`
+
+        This is very similar to `get_train_test_sequence_predictions` but 
+
+        Returns
+        - train_features     : list(tuple( user, dict(taken_courses -> ratings) ))
+        - train_ground_truth : list(dict(next_courses -> ratings))
+        - test_features      : list(tuple( user, dict(taken_courses -> ratings) ))
+        - test_ground_truth  : list(dict(next_courses -> ratings))
+        """
+        print("Computing the training and test list of sequences...")
+        train_X, train_y = [], []
+        current_user = None
+        current_courses = {}
+        taken_courses = tuple()
+        for ndx, row in tqdm(self.train_ratings.iterrows()):
+            if current_user != row['reviewers']:
+                # New user/sequence, append current results to the result set
+                for c in range(len(taken_courses) - 1):
+                    train_X.append((current_user, {i: current_courses[i] for i in taken_courses[:c+1]}))
+                    train_y.append({i: current_courses[i] for i in taken_courses[c+1:]})
+
+                current_user = row['reviewers']
+                taken_courses = (row['course_id'],)
+                current_courses = {row['course_id']: row['rating']}
+            else:
+                # Add the previous courses into the train_X list
+                taken_courses = (*taken_courses, row['course_id'])
+                current_courses[row['course_id']] = row['rating']
+        # Get the last set
+        for c in range(len(taken_courses) - 1):
+            train_X.append((current_user, {i: current_courses[i] for i in taken_courses[:c+1]}))
+            train_y.append({i: current_courses[i] for i in taken_courses[c+1:]})
+
+        test_X, test_y = [], []
+        current_user = None
+        current_courses = {}
+        taken_courses = tuple()
+        for ndx, row in tqdm(self.test_ratings.iterrows()):
+            if current_user != row['reviewers']:
+                # New user/sequence, append current results to the result set
+                for c in range(len(taken_courses) - 1):
+                    test_X.append((current_user, {i: current_courses[i] for i in taken_courses[:c+1]}))
+                    test_y.append({i: current_courses[i] for i in taken_courses[c+1:]})
+
+                current_user = row['reviewers']
+                taken_courses = (row['course_id'],)
+                current_courses = {row['course_id']: row['rating']}
+            else:
+                # Add the previous courses into the test_X list
+                taken_courses = (*taken_courses, row['course_id'])
+                current_courses[row['course_id']] = row['rating']
+        # Get the last set
+        for c in range(len(taken_courses) - 1):
+            test_X.append((current_user, {i: current_courses[i] for i in taken_courses[:c+1]}))
+            test_y.append({i: current_courses[i] for i in taken_courses[c+1:]})
 
         return train_X, test_X, train_y, test_y
