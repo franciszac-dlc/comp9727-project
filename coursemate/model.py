@@ -98,3 +98,87 @@ class AssociationMiningModel(RecommenderModel):
         _results = _candidate_set.head(k)['consequent'].apply(lambda x: x[0]).values
 
         return tuple(self.index_to_course[i] for i in _results)
+
+
+class ItemBasedCF(RecommenderModel):
+    def __init__(self, course_set: pd.DataFrame):
+        self.course_similarity_matrix = None
+        self.course_set = course_set
+
+    def fit(self, training_data: pd.DataFrame):
+        # Prepare the data in a user-item matrix format
+        user_item_matrix = self.create_user_item_matrix(training_data)
+        # Calculate the similarity matrix
+        self.course_similarity_matrix = self.calculate_similarity(user_item_matrix)
+
+    def create_user_item_matrix(self, training_data):
+        # Pivot table to create a matrix of users and courses with ratings as values
+        user_item_matrix = training_data.pivot_table(index='reviewers', columns='course_id', values='rating')
+        user_item_matrix = user_item_matrix.fillna(0)
+        return user_item_matrix
+
+    def calculate_similarity(self, user_item_matrix):
+        # Use cosine similarity
+        from sklearn.metrics.pairwise import cosine_similarity
+        similarity_matrix = cosine_similarity(user_item_matrix.T)
+        np.fill_diagonal(similarity_matrix, 0)
+        return pd.DataFrame(similarity_matrix, index=user_item_matrix.columns, columns=user_item_matrix.columns)
+
+    def recommend(self, prev_courses: tuple, k: int = 5):
+        recommendations = self.generate_recommendations(prev_courses, k)
+        return recommendations
+
+    def generate_recommendations(self, prev_courses, k):
+        # Get the similarity scores for the previous courses
+        course_similarities = self.course_similarity_matrix.loc[prev_courses].sum().sort_values(ascending=False)
+        # Exclude already rated courses
+        course_similarities = course_similarities[~course_similarities.index.isin(prev_courses)]
+        # Get top-k courses
+        top_k_courses = course_similarities.head(k).index.tolist()
+        return top_k_courses
+
+
+class UserBasedCF(RecommenderModel):
+    def __init__(self):
+        self.user_similarity_matrix = None
+        self.train_ratings = None  # Store training data here
+
+    def fit(self, training_data: pd.DataFrame):
+        # Store the training data
+        self.train_ratings = training_data
+        # Create a user-item matrix
+        user_item_matrix = self.create_user_item_matrix(training_data)
+        # Calculate the similarity matrix
+        self.user_similarity_matrix = self.calculate_similarity(user_item_matrix)
+
+    def create_user_item_matrix(self, training_data):
+        # Pivot table to create a matrix of users and courses with ratings as values
+        user_item_matrix = training_data.pivot_table(index='reviewers', columns='course_id', values='rating')
+        user_item_matrix = user_item_matrix.fillna(0)
+        return user_item_matrix
+
+    def calculate_similarity(self, user_item_matrix):
+        # Use cosine similarity
+        from sklearn.metrics.pairwise import cosine_similarity
+        similarity_matrix = cosine_similarity(user_item_matrix)
+        np.fill_diagonal(similarity_matrix, 0)
+        return pd.DataFrame(similarity_matrix, index=user_item_matrix.index, columns=user_item_matrix.index)
+
+    def recommend(self, user_id, k: int = 5):
+        recommendations = self.generate_recommendations(user_id, k)
+        return recommendations
+
+    def generate_recommendations(self, user_id, k):
+        # Get the top similar users
+        similar_users = self.user_similarity_matrix.loc[user_id].sort_values(ascending=False).head(k).index
+
+        # Filter the training data to only include ratings from similar users
+        similar_users_ratings = self.train_ratings[self.train_ratings['reviewers'].isin(similar_users)]
+
+        # Aggregate these ratings to get an average rating for each course
+        aggregated_ratings = similar_users_ratings.groupby('course_id')['rating'].mean().sort_values(ascending=False)
+
+        # Get top-k recommendations (courses with the highest average rating)
+        top_k_courses = aggregated_ratings.head(k).index.tolist()
+        return top_k_courses
+

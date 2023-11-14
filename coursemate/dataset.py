@@ -147,6 +147,30 @@ class Dataset:
 
         self.train_ratings = self.rating_set.loc[pd.Index(_train_ratings_ndx), :]
         self.test_ratings = self.rating_set.loc[pd.Index(_test_ratings_ndx), :]
+        
+    def set_train_test_split_random(self, ratio=0.8):
+        """
+        Defines a train-test split randomly. The first `ratio` of ratings
+        chronologically are added to the test set.
+
+        The split is visualized below (training set - o, test set - x)
+
+                        Ratings:
+                    1   2   3   4   5
+                1   o   o   o   x   x
+                2   o   o   o   x   x
+        Users:  3   o   o   o   x   x
+                4   o   o   o   x   x
+                5   o   o   o   x   x
+
+        Sets the following attributes for access:
+            - train_ratings
+            - test_ratings
+        """
+        print("Setting the train-test split randomly...")
+        _train_ratings_ndx, _test_ratings_ndx = train_test_split(self.rating_set.index, train_size=ratio)
+        self.train_ratings = self.rating_set.loc[pd.Index(_train_ratings_ndx), :]
+        self.test_ratings = self.rating_set.loc[pd.Index(_test_ratings_ndx), :]
 
 
     def get_train_test_matrices(self):
