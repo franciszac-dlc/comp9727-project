@@ -7,12 +7,9 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-<<<<<<< HEAD
-=======
 from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
 
->>>>>>> main
 
 from coursemate.dataset import Dataset
 
@@ -30,19 +27,8 @@ class RecommenderModel(ABC):
 class AssociationMiningModel(RecommenderModel):
     def __init__(self, cutoff: int, course_set: pd.DataFrame):
         self.cutoff = cutoff
-<<<<<<< HEAD
-        self.course_to_index = {
-            c: ndx
-            for ndx, c in enumerate(course_set.index)
-        }
-        self.index_to_course = {
-            ndx: c
-            for ndx, c in enumerate(course_set.index)
-        }
-=======
         self.course_to_index = {c: ndx for ndx, c in enumerate(course_set.index)}
         self.index_to_course = {ndx: c for ndx, c in enumerate(course_set.index)}
->>>>>>> main
 
     @staticmethod
     def generate_subsequences(sequence_dict, k):
@@ -74,15 +60,9 @@ class AssociationMiningModel(RecommenderModel):
         print(f"2-subsequences: {len(seq2)}")
         print(f"3-subsequences: {len(seq3)}")
 
-<<<<<<< HEAD
-        df_seq1 = pd.DataFrame(seq1.items(), columns=['subsequence', 'count'])
-        df_seq2 = pd.DataFrame(seq2.items(), columns=['subsequence', 'count'])
-        df_seq3 = pd.DataFrame(seq3.items(), columns=['subsequence', 'count'])
-=======
         df_seq1 = pd.DataFrame(seq1.items(), columns=["subsequence", "count"])
         df_seq2 = pd.DataFrame(seq2.items(), columns=["subsequence", "count"])
         df_seq3 = pd.DataFrame(seq3.items(), columns=["subsequence", "count"])
->>>>>>> main
 
         df_seq = pd.concat([df_seq1, df_seq2, df_seq3])
 
@@ -93,17 +73,6 @@ class AssociationMiningModel(RecommenderModel):
         return df_seq
 
     def fit(self, training_data: pd.DataFrame):
-<<<<<<< HEAD
-        _df = training_data[(training_data['count'] > self.cutoff) & (training_data['subsequence'].apply(len) > 1)].copy()
-
-        _df['antecedent'] = _df['subsequence'].apply(lambda x: x[:-1])
-        _df['consequent'] = _df['subsequence'].apply(lambda x: (x[-1],))
-        _df['antecedent_count'] = _df['antecedent'].apply(lambda x: self.df_seq_dict[x] if x in self.df_seq_dict else 0)
-        _df['consequent_count'] = _df['consequent'].apply(lambda x: self.df_seq_dict[x] if x in self.df_seq_dict else 0)
-        
-        _df['confidence'] = _df['count'] / _df['antecedent_count']
-        _df['lift'] = _df['confidence'] / (_df['antecedent_count'] / self.user_count)
-=======
         _df = training_data[
             (training_data["count"] > self.cutoff)
             & (training_data["subsequence"].apply(len) > 1)
@@ -120,7 +89,6 @@ class AssociationMiningModel(RecommenderModel):
 
         _df["confidence"] = _df["count"] / _df["antecedent_count"]
         _df["lift"] = _df["confidence"] / (_df["antecedent_count"] / self.user_count)
->>>>>>> main
 
         self.frequent_subseqs = _df
 
@@ -128,12 +96,6 @@ class AssociationMiningModel(RecommenderModel):
         prev_courses_ndx = tuple(self.course_to_index[c] for c in prev_courses)
         antecedents = AssociationMiningModel.generate_antecedents(prev_courses_ndx)
 
-<<<<<<< HEAD
-        _candidate_set = self.frequent_subseqs[self.frequent_subseqs['antecedent'].isin(antecedents)][['consequent', 'confidence']] \
-                            .sort_values(by='confidence', ascending=False) \
-                            .drop_duplicates(subset=['consequent'])
-        _results = _candidate_set.head(k)['consequent'].apply(lambda x: x[0]).values
-=======
         _candidate_set = (
             self.frequent_subseqs[
                 self.frequent_subseqs["antecedent"].isin(antecedents)
@@ -142,12 +104,10 @@ class AssociationMiningModel(RecommenderModel):
             .drop_duplicates(subset=["consequent"])
         )
         _results = _candidate_set.head(k)["consequent"].apply(lambda x: x[0]).values
->>>>>>> main
 
         return tuple(self.index_to_course[i] for i in _results)
 
 
-<<<<<<< HEAD
 class ItemBasedCF(RecommenderModel):
     def __init__(self, course_set: pd.DataFrame):
         self.course_similarity_matrix = None
@@ -230,7 +190,6 @@ class UserBasedCF(RecommenderModel):
         top_k_courses = aggregated_ratings.head(k).index.tolist()
         return top_k_courses
 
-=======
 class Content_Based(RecommenderModel):
     def __init__(self, cutoff: int, course_set: pd.DataFrame, Vectorizer, n_features):
         """
@@ -310,4 +269,3 @@ class Content_Based(RecommenderModel):
         most_similar_courses.sort(key=lambda x: x[1], reverse=True)
 
         return most_similar_courses
->>>>>>> main
