@@ -109,6 +109,88 @@ class AssociationMiningModel(RecommenderModel):
         return tuple(self.index_to_course[i] for i in _results)
 
 
+class ItemBasedCF:
+    def __init__(self, course_set: pd.DataFrame):
+        self.course_similarity_matrix = None
+        self.course_set = course_set
+
+    def fit(self, training_data: pd.DataFrame):
+        # Creating a user-item matrix
+        user_item_matrix = training_data.pivot_table(index='reviewers', columns='course_id', values='rating')
+        user_item_matrix_filled = user_item_matrix.fillna(0)
+
+        # using cosine similarity for courses
+        similarity_matrix = cosine_similarity(user_item_matrix_filled.T)
+        np.fill_diagonal(similarity_matrix, 0)
+        self.course_similarity_matrix = pd.DataFrame(similarity_matrix, index=user_item_matrix.columns, columns=user_item_matrix.columns)
+
+    def recommend(self, prev_courses: tuple, k: int = 5):
+        return self.generate_recommendations(prev_courses, k)
+
+    def generate_recommendations(self, prev_courses, k):
+        if not prev_courses or not isinstance(prev_courses, (list, tuple)):
+            return []
+
+        # Ensure prev_courses is a list...
+        prev_courses = list(prev_courses) 
+
+        # Safely calculate mean similarities
+        try:
+            course_similarities = self.course_similarity_matrix.loc[prev_courses]
+            recommended_courses = course_similarities.mean(axis=0).sort_values(ascending=False)
+        except KeyError:  # Handling case where prev_courses are not in the similarity matrix
+            return []
+
+        # Excluding courses already taken by the user
+        recommended_courses = recommended_courses[~recommended_courses.index.isin(prev_courses)]
+
+        return recommended_courses.head(k).index.tolist()
+
+
+class UserBasedCF(RecommenderModel):
+    def __init__(self):
+        self.user_similarity_matrix = None
+        self.train_ratings = None  # Store training data here
+
+    def fit(self, training_data: pd.DataFrame):
+        # Store the training data
+        self.train_ratings = training_data
+        # Create a user-item matrix
+        user_item_matrix = self.create_user_item_matrix(training_data)
+        # Calculate the similarity matrix
+        self.user_similarity_matrix = self.calculate_similarity(user_item_matrix)
+
+    def create_user_item_matrix(self, training_data):
+        # Pivot table to create a matrix of users and courses with ratings as values
+        user_item_matrix = training_data.pivot_table(index='reviewers', columns='course_id', values='rating')
+        user_item_matrix = user_item_matrix.fillna(0)
+        return user_item_matrix
+
+    def calculate_similarity(self, user_item_matrix):
+        # Use cosine similarity
+        from sklearn.metrics.pairwise import cosine_similarity
+        similarity_matrix = cosine_similarity(user_item_matrix)
+        np.fill_diagonal(similarity_matrix, 0)
+        return pd.DataFrame(similarity_matrix, index=user_item_matrix.index, columns=user_item_matrix.index)
+
+    def recommend(self, user_id, k: int = 5):
+        recommendations = self.generate_recommendations(user_id, k)
+        return recommendations
+
+    def generate_recommendations(self, user_id, k):
+        # Get the top similar users
+        similar_users = self.user_similarity_matrix.loc[user_id].sort_values(ascending=False).head(k).index
+
+        # Filter the training data to only include ratings from similar users
+        similar_users_ratings = self.train_ratings[self.train_ratings['reviewers'].isin(similar_users)]
+
+        # Aggregate these ratings to get an average rating for each course
+        aggregated_ratings = similar_users_ratings.groupby('course_id')['rating'].mean().sort_values(ascending=False)
+
+        # Get top-k recommendations (courses with the highest average rating)
+        top_k_courses = aggregated_ratings.head(k).index.tolist()
+        return top_k_courses
+
 class ContentBasedModel(RecommenderModel):
     def __init__(
         self,
