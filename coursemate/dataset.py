@@ -195,6 +195,8 @@ class Dataset:
         Returns
         - training_matrix_features     : np.array(n_train_students, n_courses)
         - training_matrix_ground_truth : np.array(n_train_students, n_courses)
+        - df_features                  : pd.DataFrame
+        - df_ground_truth              : pd.DataFrame
         """
         print("Computing the training and test rating matrix...")
         train_matrix_ground_truth = np.zeros((len(self.student_set), len(self.course_set)), dtype=np.int8)
@@ -204,17 +206,26 @@ class Dataset:
             for s in self.train_students
         }
 
+        features_ndx = []
+        ground_truth_ndx = []
+
         for ndx, row in tqdm(self.train_ratings.iterrows()):
             student_ndx = self.student_set.index.get_loc(row['reviewers'])
             course_ndx = self.course_set.index.get_loc(row['course_id'])
 
             if train_course_counts[row['reviewers']] >= 0:
                 train_matrix_features[student_ndx, course_ndx] = row['rating']
+                features_ndx.append(ndx)
+            else:
+                ground_truth_ndx.append(ndx)
 
             train_course_counts[row['reviewers']] -= 1
             train_matrix_ground_truth[student_ndx, course_ndx] = row['rating']
 
-        return train_matrix_features, train_matrix_ground_truth
+        df_features = self.train_ratings.loc[features_ndx, :].copy()
+        df_ground_truth = self.train_ratings.loc[ground_truth_ndx, :].copy()
+
+        return train_matrix_features, train_matrix_ground_truth, df_features, df_ground_truth
 
 
     def get_test_matrix_split(self, ratio=0.5):
@@ -236,15 +247,20 @@ class Dataset:
         Returns
         - test_matrix_features     : np.array(n_test_students, n_courses)
         - test_matrix_ground_truth : np.array(n_test_students, n_courses)
+        - df_features              : pd.DataFrame
+        - df_ground_truth          : pd.DataFrame
         """
         print("Computing the test rating matrix split...")
         # test_matrix_ground_truth = np.zeros((len(self.student_set), len(self.course_set)), dtype=np.int8)
-        _, test_matrix_ground_truth = self.get_train_matrix_split()
+        _, test_matrix_ground_truth, df_features, df_ground_truth = self.get_train_matrix_split()
         test_matrix_features = test_matrix_ground_truth.copy()
         test_course_counts = {
             s: int(self.student_set.loc[s, 'courses'] * ratio)
             for s in self.test_students
         }
+
+        features_ndx = []
+        ground_truth_ndx = []
 
         for ndx, row in tqdm(self.test_ratings.iterrows()):
             student_ndx = self.student_set.index.get_loc(row['reviewers'])
@@ -252,11 +268,17 @@ class Dataset:
 
             if test_course_counts[row['reviewers']] >= 0:
                 test_matrix_features[student_ndx, course_ndx] = row['rating']
+                features_ndx.append(ndx)
+            else:
+                ground_truth_ndx.append(ndx)
 
             test_course_counts[row['reviewers']] -= 1
             test_matrix_ground_truth[student_ndx, course_ndx] = row['rating']
 
-        return test_matrix_features, test_matrix_ground_truth
+        df_features_full = pd.concat([df_features, df_ground_truth, self.test_ratings.loc[features_ndx, :]])
+        df_ground_truth_full = self.test_ratings.loc[ground_truth_ndx, :].copy()
+
+        return test_matrix_features, test_matrix_ground_truth, df_features_full, df_ground_truth_full
 
 
     def get_train_test_sequence_predictions(self):
