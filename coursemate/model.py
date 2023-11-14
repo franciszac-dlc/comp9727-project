@@ -1,7 +1,7 @@
 from collections import defaultdict
 from itertools import combinations
 from abc import ABC, abstractmethod
-from typing import Callable, Any
+from typing import Callable, Any, Union
 
 from tqdm import tqdm
 import pandas as pd
@@ -9,6 +9,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 
 
 from coursemate.dataset import Dataset
@@ -108,18 +109,21 @@ class AssociationMiningModel(RecommenderModel):
         return tuple(self.index_to_course[i] for i in _results)
 
 
-class Content_Based(RecommenderModel):
-    def __init__(self, cutoff: int, course_set: pd.DataFrame, Vectorizer, n_features):
+class ContentBasedModel(RecommenderModel):
+    def __init__(
+        self,
+        course_set: pd.DataFrame,
+        Vectorizer: Union[TfidfVectorizer, CountVectorizer] = TfidfVectorizer,
+        n_features: int = 10000,
+    ):
         """
-        Initializes the Content_Based recommender model.
+        Initializes the Content Based recommender model.
 
         Parameters:
-        cutoff (int): The cutoff value for the recommender.
         course_set (pd.DataFrame): The set of courses available for recommendation.
         Vectorizer: The vectorizer to be used for transforming course descriptions and skills into vectors.
         n_features (int): The maximum number of features to be used by the vectorizer.
         """
-        self.cutoff = cutoff
         self.course_set = course_set
 
         # Move to the fit function?
@@ -132,6 +136,9 @@ class Content_Based(RecommenderModel):
                 [row["description"] + row["skills"]]
             )
 
+    def fit(self, training_data: Any):
+        pass
+
     def recommend(self, prev_courses: tuple, k: int = 5):
         """
         Recommends courses based on the courses previously taken by the user.
@@ -143,32 +150,15 @@ class Content_Based(RecommenderModel):
         Returns:
         list: The IDs of the recommended courses.
         """
-        most_similar_courses = self.find_most_similar_courses(prev_courses)[:k]
+        #indexes = ()
 
-        recommended_courses = []
-        for course_id, similarity in most_similar_courses:
-            recommended_courses.append(course_id)
-
-        return recommended_courses
-
-    def find_most_similar_courses(self, prev_courses):
-        """
-        Finds the most similar courses to the user's previously reviewed courses.
-
-        Parameters:
-        prev_courses (tuple): The courses previously reviewed by the user.
-
-        Returns:
-        list: A sorted list of tuples where each tuple contains a course ID and its similarity score with the user_vector.
-        """
-
-        user_reviews_skills = self.course_set[self.course_set.index in prev_courses][
-            "skills"
-        ]
-        user_reviews_description = self.course_set[
-            self.course_set.index in prev_courses
-        ]["description"]
+        #for i in range(len(prev_courses)):
+        #    indexes = indexes + (self.course_set.loc[prev_courses[i]].name,)
+        #print(indexes)
+        user_reviews_skills = self.course_set[self.course_set.index.isin(prev_courses)]["skills"]
+        user_reviews_description = self.course_set[self.course_set.index.isin(prev_courses)]["description"]
         user_reviews_combined = user_reviews_skills + " " + user_reviews_description
+
         user_vector = self.vectorizer.transform(user_reviews_combined)
 
         most_similar_courses = []
@@ -185,5 +175,10 @@ class Content_Based(RecommenderModel):
             most_similar_courses.append((other_course_id, similarity.mean()))
 
         most_similar_courses.sort(key=lambda x: x[1], reverse=True)
+        most_similar_courses = most_similar_courses[:k]
 
-        return most_similar_courses
+        recommended_courses = []
+        for course_id, similarity in most_similar_courses:
+            recommended_courses.append(course_id)
+
+        return recommended_courses
