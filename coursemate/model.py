@@ -140,6 +140,29 @@ class ItemBasedCF:
         recommended_courses = recommended_courses[~recommended_courses.index.isin(prev_courses)]
 
         return recommended_courses.head(k).index.tolist()
+    
+    def predict_all_ratings(self, test_data: pd.DataFrame):
+        results_df = pd.DataFrame()
+
+        for user_id in tqdm(test_data['reviewers'].unique()):
+            user_history = test_data[test_data['reviewers'] == user_id]['course_id'].values
+
+            # Calculate mean similarity for each course
+            course_similarities = self.course_similarity_matrix.loc[user_history]
+            predicted_ratings = course_similarities.mean(axis=0).sort_values(ascending=False)
+
+            # courses the user has already taken
+            predicted_ratings = predicted_ratings[~predicted_ratings.index.isin(user_history)]
+
+            user_df = pd.DataFrame({
+                'user_id': user_id,
+                'course_id': predicted_ratings.index,
+                'predicted_rating': predicted_ratings.values
+            })
+
+            results_df = pd.concat([results_df, user_df])
+
+        return results_df.reset_index(drop=True)
 
 
 class UserBasedCF(RecommenderModel):
@@ -184,6 +207,34 @@ class UserBasedCF(RecommenderModel):
         # Get top-k recommendations (courses with the highest average rating)
         top_k_courses = aggregated_ratings.head(k).index.tolist()
         return top_k_courses
+    
+    def predict_all_ratings(self, test_data: pd.DataFrame, k: int = 5):
+        results_df = pd.DataFrame()
+
+        for user_id in tqdm(test_data['reviewers'].unique()):
+            try:
+                similar_users = self.user_similarity_matrix.loc[user_id].sort_values(ascending=False).head(k).index
+            except KeyError:
+                continue
+
+            # ratings from similar users
+            similar_users_ratings = self.train_ratings[self.train_ratings['reviewers'].isin(similar_users)]
+            
+            # Aggregate to predict scores
+            predicted_ratings = similar_users_ratings.groupby('course_id')['rating'].mean().sort_values(ascending=False)
+
+            user_rated_courses = test_data[test_data['reviewers'] == user_id]['course_id']
+            predicted_ratings = predicted_ratings[~predicted_ratings.index.isin(user_rated_courses)]
+
+            user_df = pd.DataFrame({
+                'user_id': user_id,
+                'course_id': predicted_ratings.index,
+                'predicted_rating': predicted_ratings.values
+            })
+
+            results_df = pd.concat([results_df, user_df])
+
+        return results_df.reset_index(drop=True)
 
 
 class Content_Based(RecommenderModel):
