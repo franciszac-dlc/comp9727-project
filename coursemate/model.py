@@ -111,7 +111,6 @@ class AssociationMiningModel(RecommenderModel):
 class ItemBasedCF:
     def __init__(self, course_set: pd.DataFrame):
         self.course_similarity_matrix = None
-        self.course_set = course_set
 
     def fit(self, training_data: pd.DataFrame):
         # Creating a user-item matrix
@@ -127,9 +126,6 @@ class ItemBasedCF:
         return self.generate_recommendations(prev_courses, k)
 
     def generate_recommendations(self, prev_courses, k):
-        if not prev_courses or not isinstance(prev_courses, (list, tuple)):
-            return []
-
         # Ensure prev_courses is a list...
         prev_courses = list(prev_courses) 
 
@@ -149,7 +145,7 @@ class ItemBasedCF:
 class UserBasedCF(RecommenderModel):
     def __init__(self):
         self.user_similarity_matrix = None
-        self.train_ratings = None  # Store training data here
+        self.train_ratings = None
 
     def fit(self, training_data: pd.DataFrame):
         # Store the training data
@@ -160,25 +156,24 @@ class UserBasedCF(RecommenderModel):
         self.user_similarity_matrix = self.calculate_similarity(user_item_matrix)
 
     def create_user_item_matrix(self, training_data):
-        # Pivot table to create a matrix of users and courses with ratings as values
         user_item_matrix = training_data.pivot_table(index='reviewers', columns='course_id', values='rating')
         user_item_matrix = user_item_matrix.fillna(0)
         return user_item_matrix
 
     def calculate_similarity(self, user_item_matrix):
-        # Use cosine similarity
-        from sklearn.metrics.pairwise import cosine_similarity
         similarity_matrix = cosine_similarity(user_item_matrix)
         np.fill_diagonal(similarity_matrix, 0)
         return pd.DataFrame(similarity_matrix, index=user_item_matrix.index, columns=user_item_matrix.index)
 
     def recommend(self, user_id, k: int = 5):
-        recommendations = self.generate_recommendations(user_id, k)
-        return recommendations
+        return self.generate_recommendations(user_id, k)
 
     def generate_recommendations(self, user_id, k):
         # Get the top similar users
-        similar_users = self.user_similarity_matrix.loc[user_id].sort_values(ascending=False).head(k).index
+        try:
+            similar_users = self.user_similarity_matrix.loc[user_id].sort_values(ascending=False).head(k).index
+        except KeyError:
+            return []
 
         # Filter the training data to only include ratings from similar users
         similar_users_ratings = self.train_ratings[self.train_ratings['reviewers'].isin(similar_users)]
@@ -189,6 +184,7 @@ class UserBasedCF(RecommenderModel):
         # Get top-k recommendations (courses with the highest average rating)
         top_k_courses = aggregated_ratings.head(k).index.tolist()
         return top_k_courses
+
 
 class Content_Based(RecommenderModel):
     def __init__(self, cutoff: int, course_set: pd.DataFrame, Vectorizer, n_features):
