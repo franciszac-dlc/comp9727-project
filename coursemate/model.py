@@ -108,6 +108,22 @@ class AssociationMiningModel(RecommenderModel):
 
         return tuple(self.index_to_course[i] for i in _results)
 
+    def generate_scores(self, user: str, prev_courses: tuple):
+        prev_courses_ndx = tuple(self.course_to_index[c] for c in prev_courses)
+        antecedents = AssociationMiningModel.generate_antecedents(prev_courses_ndx)
+
+        _candidate_set = (
+            self.frequent_subseqs[
+                self.frequent_subseqs["antecedent"].isin(antecedents)
+            ][["consequent", "confidence"]]
+            .drop_duplicates(subset=["consequent"])
+        )[["consequent", "confidence"]]
+
+        _candidate_set["course"] = _candidate_set["consequent"].apply(lambda x: self.index_to_course[x[0]])
+        _candidate_set["user"] = user
+
+        return _candidate_set[['user', 'course', 'confidence']]
+
 
 class ItemBasedCF:
     def __init__(self, course_set: pd.DataFrame):
