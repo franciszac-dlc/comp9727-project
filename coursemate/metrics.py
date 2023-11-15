@@ -9,20 +9,35 @@ def calculate_hit_rate_from_next_course_sequences(
     reqs = 0
     for (user, prev_courses), next_course in tqdm(zip(X, y), total=len(X)):
         reqs += 1
-        if next_course in recommender_func(prev_courses, k):
+        pred_courses = set(recommender_func(prev_courses, k))
+        if len(pred_courses & set(next_course)) > 0:
             hits += 1
     return hits / reqs
 
 
-def calculate_precision_from_next_course_sets(
+def calculate_precision_from_next_course_sequences(
         X: Iterable, y: Iterable, recommender_func: Callable, k: int = 5
     ):
     precs = 0
     reqs = 0
-    for (user, prev_courses_dict), next_courses_dict in tqdm(zip(X, y), total=len(X)):
+    for (user, prev_courses), next_course in tqdm(zip(X, y), total=len(X)):
         reqs += 1
-        prev_courses = set(prev_courses_dict.keys())
-        next_courses = set(next_courses_dict.keys())
         pred_courses = set(recommender_func(prev_courses, k))
-        precs += (len(pred_courses & next_courses) / max(len(pred_courses), 1))
+        precs += (len(pred_courses & set(next_course)) / max(len(pred_courses), 1))
     return precs / reqs
+
+
+def calculate_f1score_from_next_course_sequences(
+        X: Iterable, y: Iterable, recommender_func: Callable, k: int = 5
+    ):
+    f1scores = 0
+    reqs = 0
+    for (user, prev_courses), next_course in tqdm(zip(X, y), total=len(X)):
+        reqs += 1
+        pred_courses = set(recommender_func(prev_courses, k))
+        next_courses_set = set(next_course)
+        precision = (len(pred_courses & next_courses_set) / max(len(pred_courses), 1))
+        recall = (len(pred_courses & next_courses_set) / max(len(next_course), 1))
+        if precision + recall > 0:
+            f1scores += (2 * (precision * recall) / (precision + recall))
+    return f1scores / reqs

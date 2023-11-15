@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -348,64 +350,58 @@ class Dataset:
         return train_X, test_X, train_y, test_y
 
 
-    def get_train_test_next_course_predictions(self):
+    def get_train_test_next_course_predictions(self, ratio=0.5):
         """
         Computes training and test data instances for next course prediction.
-        This is meant to be ran after running `set_train_test_split_by_ratings`
 
         This is very similar to `get_train_test_sequence_predictions` but 
 
         Returns
-        - train_features     : list(tuple( user, dict(taken_courses -> ratings) ))
-        - train_ground_truth : list(dict(next_courses -> ratings))
-        - test_features      : list(tuple( user, dict(taken_courses -> ratings) ))
-        - test_ground_truth  : list(dict(next_courses -> ratings))
+        - train_features     : list(tuple( user, tuple(taken_courses) ) ))
+        - test_features      : list(tuple( user, tuple(taken_courses) ))
+        - train_ground_truth : list(next_course)
+        - test_ground_truth  : list(tuple( next_courses ))
         """
         print("Computing the training and test list of sequences...")
         train_X, train_y = [], []
         current_user = None
-        current_courses = {}
         taken_courses = tuple()
         for ndx, row in tqdm(self.train_ratings.iterrows()):
             if current_user != row['reviewers']:
-                # New user/sequence, append current results to the result set
-                for c in range(len(taken_courses) - 1):
-                    train_X.append((current_user, {i: current_courses[i] for i in taken_courses[:c+1]}))
-                    train_y.append({i: current_courses[i] for i in taken_courses[c+1:]})
-
+                # New user/sequence, 
                 current_user = row['reviewers']
                 taken_courses = (row['course_id'],)
-                current_courses = {row['course_id']: row['rating']}
             else:
                 # Add the previous courses into the train_X list
+                train_X.append((current_user, taken_courses))
+                train_y.append(row['course_id'])
                 taken_courses = (*taken_courses, row['course_id'])
-                current_courses[row['course_id']] = row['rating']
-        # Get the last set
-        for c in range(len(taken_courses) - 1):
-            train_X.append((current_user, {i: current_courses[i] for i in taken_courses[:c+1]}))
-            train_y.append({i: current_courses[i] for i in taken_courses[c+1:]})
 
-        test_X, test_y = [], []
-        current_user = None
-        current_courses = {}
-        taken_courses = tuple()
+        # For the test set, to match the current splits, it is generated differently
+        taken_courses = defaultdict(tuple)  # user -> tuple(courses)
+        next_courses = defaultdict(tuple)  # user -> tuple(courses)
+        test_course_counts = {
+            s: int(self.student_set.loc[s, 'courses'] * ratio)
+            for s in self.test_students
+        }
         for ndx, row in tqdm(self.test_ratings.iterrows()):
-            if current_user != row['reviewers']:
-                # New user/sequence, append current results to the result set
-                for c in range(len(taken_courses) - 1):
-                    test_X.append((current_user, {i: current_courses[i] for i in taken_courses[:c+1]}))
-                    test_y.append({i: current_courses[i] for i in taken_courses[c+1:]})
-
-                current_user = row['reviewers']
-                taken_courses = (row['course_id'],)
-                current_courses = {row['course_id']: row['rating']}
+            if test_course_counts[row['reviewers']] >= 0:
+                # append to inputs
+                taken_courses[row['reviewers']] = (
+                    *taken_courses[row['reviewers']],
+                    row['course_id']
+                )
             else:
-                # Add the previous courses into the test_X list
-                taken_courses = (*taken_courses, row['course_id'])
-                current_courses[row['course_id']] = row['rating']
-        # Get the last set
-        for c in range(len(taken_courses) - 1):
-            test_X.append((current_user, {i: current_courses[i] for i in taken_courses[:c+1]}))
-            test_y.append({i: current_courses[i] for i in taken_courses[c+1:]})
+                # append to outputs
+                next_courses[row['reviewers']] = (
+                    *next_courses[row['reviewers']],
+                    row['course_id']
+                )
+
+            test_course_counts[row['reviewers']] -= 1
+
+        # Generate results
+        test_X = list((user, taken_courses[user]) for user in taken_courses.keys())
+        test_y = list(next_courses[user] for user in next_courses.keys())
 
         return train_X, test_X, train_y, test_y

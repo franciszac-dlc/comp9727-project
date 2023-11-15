@@ -1,3 +1,8 @@
 **/*.csv
 **/*.pyc
 **/.ipynb_checkpoints/
+Scripts/
+share/
+Lib/
+etc/
+pyvenv.cfg
