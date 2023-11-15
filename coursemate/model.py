@@ -108,11 +108,26 @@ class AssociationMiningModel(RecommenderModel):
 
         return tuple(self.index_to_course[i] for i in _results)
 
+    def generate_scores(self, user: str, prev_courses: tuple):
+        prev_courses_ndx = tuple(self.course_to_index[c] for c in prev_courses)
+        antecedents = AssociationMiningModel.generate_antecedents(prev_courses_ndx)
+
+        _candidate_set = (
+            self.frequent_subseqs[
+                self.frequent_subseqs["antecedent"].isin(antecedents)
+            ][["consequent", "confidence"]]
+            .drop_duplicates(subset=["consequent"])
+        )[["consequent", "confidence"]]
+
+        _candidate_set["course"] = _candidate_set["consequent"].apply(lambda x: self.index_to_course[x[0]])
+        _candidate_set["user"] = user
+
+        return _candidate_set[['user', 'course', 'confidence']]
+
 
 class ItemBasedCF:
     def __init__(self, course_set: pd.DataFrame):
         self.course_similarity_matrix = None
-        self.course_set = course_set
 
     def fit(self, training_data: pd.DataFrame):
         # Creating a user-item matrix
@@ -128,9 +143,6 @@ class ItemBasedCF:
         return self.generate_recommendations(prev_courses, k)
 
     def generate_recommendations(self, prev_courses, k):
-        if not prev_courses or not isinstance(prev_courses, (list, tuple)):
-            return []
-
         # Ensure prev_courses is a list...
         prev_courses = list(prev_courses) 
 
@@ -145,12 +157,35 @@ class ItemBasedCF:
         recommended_courses = recommended_courses[~recommended_courses.index.isin(prev_courses)]
 
         return recommended_courses.head(k).index.tolist()
+    
+    def predict_all_ratings(self, test_data: pd.DataFrame):
+        results_df = pd.DataFrame()
+
+        for user_id in tqdm(test_data['reviewers'].unique()):
+            user_history = test_data[test_data['reviewers'] == user_id]['course_id'].values
+
+            # Calculate mean similarity for each course
+            course_similarities = self.course_similarity_matrix.loc[user_history]
+            predicted_ratings = course_similarities.mean(axis=0).sort_values(ascending=False)
+
+            # courses the user has already taken
+            predicted_ratings = predicted_ratings[~predicted_ratings.index.isin(user_history)]
+
+            user_df = pd.DataFrame({
+                'user_id': user_id,
+                'course_id': predicted_ratings.index,
+                'predicted_rating': predicted_ratings.values
+            })
+
+            results_df = pd.concat([results_df, user_df])
+
+        return results_df.reset_index(drop=True)
 
 
 class UserBasedCF(RecommenderModel):
     def __init__(self):
         self.user_similarity_matrix = None
-        self.train_ratings = None  # Store training data here
+        self.train_ratings = None
 
     def fit(self, training_data: pd.DataFrame):
         # Store the training data
@@ -161,25 +196,24 @@ class UserBasedCF(RecommenderModel):
         self.user_similarity_matrix = self.calculate_similarity(user_item_matrix)
 
     def create_user_item_matrix(self, training_data):
-        # Pivot table to create a matrix of users and courses with ratings as values
         user_item_matrix = training_data.pivot_table(index='reviewers', columns='course_id', values='rating')
         user_item_matrix = user_item_matrix.fillna(0)
         return user_item_matrix
 
     def calculate_similarity(self, user_item_matrix):
-        # Use cosine similarity
-        from sklearn.metrics.pairwise import cosine_similarity
         similarity_matrix = cosine_similarity(user_item_matrix)
         np.fill_diagonal(similarity_matrix, 0)
         return pd.DataFrame(similarity_matrix, index=user_item_matrix.index, columns=user_item_matrix.index)
 
     def recommend(self, user_id, k: int = 5):
-        recommendations = self.generate_recommendations(user_id, k)
-        return recommendations
+        return self.generate_recommendations(user_id, k)
 
     def generate_recommendations(self, user_id, k):
         # Get the top similar users
-        similar_users = self.user_similarity_matrix.loc[user_id].sort_values(ascending=False).head(k).index
+        try:
+            similar_users = self.user_similarity_matrix.loc[user_id].sort_values(ascending=False).head(k).index
+        except KeyError:
+            return []
 
         # Filter the training data to only include ratings from similar users
         similar_users_ratings = self.train_ratings[self.train_ratings['reviewers'].isin(similar_users)]
@@ -190,6 +224,35 @@ class UserBasedCF(RecommenderModel):
         # Get top-k recommendations (courses with the highest average rating)
         top_k_courses = aggregated_ratings.head(k).index.tolist()
         return top_k_courses
+    
+    def predict_all_ratings(self, test_data: pd.DataFrame, k: int = 5):
+        results_df = pd.DataFrame()
+
+        for user_id in tqdm(test_data['reviewers'].unique()):
+            try:
+                similar_users = self.user_similarity_matrix.loc[user_id].sort_values(ascending=False).head(k).index
+            except KeyError:
+                continue
+
+            # ratings from similar users
+            similar_users_ratings = self.train_ratings[self.train_ratings['reviewers'].isin(similar_users)]
+            
+            # Aggregate to predict scores
+            predicted_ratings = similar_users_ratings.groupby('course_id')['rating'].mean().sort_values(ascending=False)
+
+            user_rated_courses = test_data[test_data['reviewers'] == user_id]['course_id']
+            predicted_ratings = predicted_ratings[~predicted_ratings.index.isin(user_rated_courses)]
+
+            user_df = pd.DataFrame({
+                'user_id': user_id,
+                'course_id': predicted_ratings.index,
+                'predicted_rating': predicted_ratings.values
+            })
+
+            results_df = pd.concat([results_df, user_df])
+
+        return results_df.reset_index(drop=True)
+
 
 class ContentBasedModel(RecommenderModel):
     def __init__(
