@@ -259,8 +259,8 @@ class ContentBasedModel(RecommenderModel):
         most_similar_courses.sort(key=lambda x: x[1], reverse=True)
         most_similar_courses = most_similar_courses[:k]
 
-        recommended_courses = []
-        for course_id, similarity in most_similar_courses:
-            recommended_courses.append(course_id)
+        # recommended_courses = []
+        # for course_id, similarity in most_similar_courses:
+        #     recommended_courses.append(course_id)
 
-        return recommended_courses
+        return most_similar_courses
