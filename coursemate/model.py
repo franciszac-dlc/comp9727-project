@@ -1,15 +1,19 @@
 from collections import defaultdict
 from itertools import combinations
 from abc import ABC, abstractmethod
-from typing import Callable, Any, Union
+from typing import Callable, Any, List, Union
 
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
+import re
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import normalize
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
 
 
 from coursemate.dataset import Dataset
@@ -258,31 +262,71 @@ class ContentBasedModel(RecommenderModel):
     def __init__(
         self,
         course_set: pd.DataFrame,
-        Vectorizer: Union[TfidfVectorizer, CountVectorizer] = TfidfVectorizer,
-        n_features: int = 10000,
     ):
         """
         Initializes the Content Based recommender model.
 
         Parameters:
         course_set (pd.DataFrame): The set of courses available for recommendation.
-        Vectorizer: The vectorizer to be used for transforming course descriptions and skills into vectors.
-        n_features (int): The maximum number of features to be used by the vectorizer.
         """
         self.course_set = course_set
+        
+        
 
-        # Move to the fit function?
+    def fit(self, Vectorizer: Union[TfidfVectorizer, CountVectorizer] = TfidfVectorizer,
+        n_features: int = 10000, categories: List[str]=['data','description']):
+        """
+        Fit the vectorizer on the combined text of specified columns in the course_set DataFrame.
+        Generate course vectors using the fitted vectorizer and store them in the course_vectors attribute.
+
+        Parameters:
+        Vectorizer (Union[TfidfVectorizer, CountVectorizer]): The vectorizer to be used for transforming course descriptions and skills into vectors.
+        n_features (int): The maximum number of features to be used by the vectorizer.
+        categories (List[str]): The list of columns to be combined for generating course vectors.
+
+        Returns:
+        None
+        """
+        
+        self.categories = categories
+        combined_series = self.course_set[self.categories].apply(lambda row: ' '.join(row.values.astype(str)), axis=1)
+
         self.vectorizer = Vectorizer(max_features=n_features)
-        self.vectorizer.fit(self.course_set["description"] + self.course_set["skills"])
-
+        self.vectorizer.fit(combined_series)
+        
         self.course_vectors = {}
         for id, row in self.course_set.iterrows():
-            self.course_vectors[id] = self.vectorizer.transform(
-                [row["description"] + row["skills"]]
-            )
+            combined_string = ' '.join(row[field] for field in self.categories)
+            self.course_vectors[id] = self.vectorizer.transform([combined_string])
+ 
 
-    def fit(self, training_data: Any):
-        pass
+    def preprocess(self):
+        """
+        Preprocess the 'skills' and 'description' columns in the course_set DataFrame.
+
+        This method applies text processing techniques such as lemmatization, removal of stop words, and special character cleanup.
+        The processed values are then stored back in the respective columns of the course_set DataFrame.
+
+        Returns:
+        None
+        """
+        lemmatizer = WordNetLemmatizer()
+        stop_words = set(stopwords.words('english'))
+
+        def process_skills(skill_text):
+            skills = set(skill_text.replace(')','').replace('(','').replace('-',' ').lower().split())
+            return ' '.join(skills)
+
+        def process_description(description):
+            description = description.lower()
+            description = re.sub(r'[^\w\s]', '', description)
+            tokens = word_tokenize(description)
+            tokens = [word for word in tokens if word not in stop_words]
+            tokens = [lemmatizer.lemmatize(word) for word in tokens]
+            return ' '.join(tokens)        
+
+        self.course_set.loc[:, 'skills'] = self.course_set['skills'].apply(process_skills)
+        self.course_set.loc[:, 'description'] = self.course_set['description'].apply(process_description)
 
     def recommend(self, prev_courses: tuple, k: int = 5):
         """
@@ -295,15 +339,15 @@ class ContentBasedModel(RecommenderModel):
         Returns:
         list: The IDs of the recommended courses.
         """
-        #indexes = ()
 
-        #for i in range(len(prev_courses)):
-        #    indexes = indexes + (self.course_set.loc[prev_courses[i]].name,)
-        #print(indexes)
-        user_reviews_skills = self.course_set[self.course_set.index.isin(prev_courses)]["skills"]
-        user_reviews_description = self.course_set[self.course_set.index.isin(prev_courses)]["description"]
-        user_reviews_combined = user_reviews_skills + " " + user_reviews_description
 
+        selected_rows = self.course_set[self.course_set.index.isin(prev_courses)]
+        user_reviews_combined = selected_rows[self.categories].apply(lambda row: ' '.join(row.values.astype(str)), axis=1)
+
+        #user_reviews_skills = self.course_set[self.course_set.index.isin(prev_courses)]["skills"]
+        #user_reviews_description = self.course_set[self.course_set.index.isin(prev_courses)]["description"]
+        #user_reviews_combined = user_reviews_skills + " " + user_reviews_description
+        #print(type(user_reviews_skills + " " + user_reviews_description))
         user_vector = self.vectorizer.transform(user_reviews_combined)
 
         most_similar_courses = []
@@ -318,12 +362,84 @@ class ContentBasedModel(RecommenderModel):
                 normalized_user_vector, normalized_course_vector
             )
             most_similar_courses.append((other_course_id, similarity.mean()))
-
+        
         most_similar_courses.sort(key=lambda x: x[1], reverse=True)
         most_similar_courses = most_similar_courses[:k]
-
-        # recommended_courses = []
-        # for course_id, similarity in most_similar_courses:
-        #     recommended_courses.append(course_id)
-
         return most_similar_courses
+
+    def ContentBasedModel_gridsearch(self,x:pd.DataFrame, y:pd.DataFrame,vectorizers:List[Union[TfidfVectorizer, CountVectorizer]],n_users:int = 250, n_features:List[int]=[100,1000,10000],categories: List[List[str]]=[['skills'],['description'], ['skills','description']],k_list:List[int]=[5,10]):
+        """
+        Perform grid search for Content-Based Recommender Model with different configurations.
+
+        Parameters:
+        x (pd.DataFrame): Training data.
+        y (pd.DataFrame): Target data.
+        vectorizers (List[Union[TfidfVectorizer, CountVectorizer]]): List of vectorizers to be used in the grid search.
+        n_users (int): Number of users to consider in the grid search.
+        n_features (List[int]): List of numbers of features to consider in the grid search.
+        categories (List[List[str]]): List of column combinations to consider in the grid search.
+        k_list (List[int]): List of values for k in the grid search.
+
+        Returns:
+        List[Dict]: List of dictionaries containing grid search results for different configurations.
+        """
+        self.preprocess()
+
+        unique_reviewers_X = x['reviewers'].unique()
+        unique_reviewers_y = y['reviewers'].unique()
+        results = []
+        for n in n_features:
+            for vectorizer in vectorizers:
+                for data in categories:
+                    self.fit(vectorizer,n,data)
+
+                    statistics = {k: {'true_positives': 0, 'false_positives': 0, 'false_negatives': 0} for k in k_list}
+                    hits = {k: 0 for k in k_list}
+                    count = 0
+
+                    for user in unique_reviewers_X:
+                        if user in unique_reviewers_y:
+                            count += 1
+                            user_profile = tuple(x[x['reviewers'] == user]['course_id'])
+                            target = y[y['reviewers'] == user]['course_id']
+
+                            recommendations = self.recommend(user_profile,None)
+                            recommendation_ids = [recommendation[0] for recommendation in recommendations]
+                            
+                            # Statistics gathering 
+                            for k in k_list:
+                                statistics[k]['true_positives'] += len(set(target) & set(recommendation_ids[:k]))
+                                statistics[k]['false_positives'] += len(set(recommendation_ids[:k]) - set(target))
+                                statistics[k]['false_negatives'] += len(set(target) - set(recommendation_ids[:k]))
+                                if len(set(target) & set(recommendation_ids[:k])) > 0:
+                                    hits[k] += 1
+                        if count == n_users:
+                            break
+
+                    # Metric calculation
+                    metrics_per_vectorizer = {'Vectorizer': vectorizer.__name__,
+                                            'n_features': n,
+                                            'categories': data,
+                                            'statistics': statistics,
+                                            'hits': hits}
+
+                    results.append(metrics_per_vectorizer)
+                    # Print or return the results for further analysis
+        # for result in results:
+        #     print(f"Vectorizer: {result['Vectorizer']}, n_features: {result['n_features']}, categories: {result['categories']}")
+        #     for k in k_list:
+        #         precision = result['statistics'][k]['true_positives'] / (
+        #                 result['statistics'][k]['true_positives'] + result['statistics'][k]['false_positives']) \
+        #             if (result['statistics'][k]['true_positives'] + result['statistics'][k]['false_positives']) > 0 else 0
+        #         recall = result['statistics'][k]['true_positives'] / (
+        #                 result['statistics'][k]['true_positives'] + result['statistics'][k]['false_negatives']) \
+        #             if (result['statistics'][k]['true_positives'] + result['statistics'][k]['false_negatives']) > 0 else 0
+
+        #         f1_score = 2 * (precision * recall) / (precision + recall) \
+        #             if (precision + recall) > 0 else 0
+
+        #         print(f"For k={k}:")
+        #         print(f"Hitrate:{(result['hits'][k] / count):.3f}\tF1 Score:{f1_score:.3f}\tPrecision:{precision:.3f}")
+        return results
+
+        
